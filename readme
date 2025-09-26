@@ -1,0 +1,15 @@
+# Backend con PostgreSQL (Neon)
+
+Proyecto backend sencillo usando Node.js, Express y PostgreSQL conectado a Neon.
+
+## 📋 Prerrequisitos
+
+- Node.js (versión 16 o superior)
+- npm o yarn
+- Cuenta en Neon con base de datos creada
+
+## 🚀 Instalación
+
+1. **Instalar dependencias**
+```bash
+npm install
