@@ -175,6 +175,141 @@ app.get("/auth/profile/:username", async (req, res) => {
   }
 });
 
+
+// Ruta para cambiar contraseña
+app.put("/auth/change-password", async (req, res) => {
+  const { userId, newPassword, currentPassword } = req.body;
+
+  // Validar que se enviaron los datos requeridos
+  if (!userId || !newPassword) {
+    return res.status(400).json({
+      success: false,
+      message: "ID de usuario y nueva contraseña son requeridos",
+    });
+  }
+
+  // Validar longitud mínima de contraseña
+  if (newPassword.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: "La nueva contraseña debe tener al menos 6 caracteres",
+    });
+  }
+
+  try {
+    // Verificar que el usuario existe y está activo
+    const userResult = await pool.query(
+      "SELECT id, username, password, is_active FROM users_login WHERE id = $1",
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Usuario no encontrado",
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Verificar si el usuario está activo
+    if (!user.is_active) {
+      return res.status(401).json({
+        success: false,
+        message: "Usuario desactivado. Contacta al administrador",
+      });
+    }
+
+    // Si se proporciona contraseña actual, verificarla (recomendado para seguridad)
+    if (currentPassword && user.password !== currentPassword) {
+      return res.status(401).json({
+        success: false,
+        message: "La contraseña actual no es correcta",
+      });
+    }
+
+    // Actualizar la contraseña
+    const updateResult = await pool.query(
+      "UPDATE users_login SET password = $1, updated_at = NOW() WHERE id = $2 RETURNING username",
+      [newPassword, userId]
+    );
+
+    // Verificar que se actualizó correctamente
+    if (updateResult.rows.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: "Error actualizando la contraseña",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Contraseña actualizada exitosamente",
+      username: updateResult.rows[0].username,
+    });
+
+  } catch (error) {
+    console.error("Error cambiando contraseña:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+    });
+  }
+});
+
+// Ruta alternativa más simple (solo con userId y newPassword)
+app.put("/auth/reset-password", async (req, res) => {
+  const { userId, newPassword } = req.body;
+
+  // Validar datos requeridos
+  if (!userId || !newPassword) {
+    return res.status(400).json({
+      success: false,
+      message: "ID de usuario y nueva contraseña son requeridos",
+    });
+  }
+
+  // Validar longitud mínima de contraseña
+  if (newPassword.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: "La nueva contraseña debe tener al menos 6 caracteres",
+    });
+  }
+
+  try {
+    // Verificar que el usuario existe y actualizarlo directamente
+    const result = await pool.query(
+      "UPDATE users_login SET password = $1, updated_at = NOW() WHERE id = $2 AND is_active = true RETURNING id, username",
+      [newPassword, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Usuario no encontrado o desactivado",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Contraseña restablecida exitosamente",
+      user: {
+        id: result.rows[0].id,
+        username: result.rows[0].username,
+      },
+    });
+
+  } catch (error) {
+    console.error("Error restableciendo contraseña:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+    });
+  }
+});
+
+
 // Manejo de errores global
 app.use((error, req, res, next) => {
   console.error("Error no manejado:", error);
