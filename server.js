@@ -310,6 +310,214 @@ app.put("/auth/reset-password", async (req, res) => {
 });
 
 
+// nuevos endpoints para crear tareas y obtenerlas creadas por usuario
+
+// ======================
+// RUTAS DE TAREAS DIARIAS
+// ======================
+
+// Endpoint para registrar/actualizar tarea diaria
+app.post("/registrarTarea", async (req, res) => {
+  const { username, date, status, description, timestamp } = req.body;
+
+  // Validar datos requeridos
+  if (!username || !date || !status) {
+    return res.status(400).json({
+      success: false,
+      message: "Username, fecha y estado son requeridos",
+    });
+  }
+
+  // Validar que el status sea válido
+  if (status !== 'completed' && status !== 'failed') {
+    return res.status(400).json({
+      success: false,
+      message: "El estado debe ser 'completed' o 'failed'",
+    });
+  }
+
+  try {
+    // Verificar que el usuario existe
+    const userCheck = await pool.query(
+      "SELECT username FROM users_login WHERE username = $1 AND is_active = true",
+      [username]
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Usuario no encontrado o desactivado",
+      });
+    }
+
+    // Insertar o actualizar el reporte diario
+    // Si ya existe un reporte para ese usuario y fecha, se actualiza
+    const result = await pool.query(
+      `INSERT INTO daily_reports (username, date, status, description, timestamp) 
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (username, date) 
+       DO UPDATE SET 
+         status = EXCLUDED.status,
+         description = EXCLUDED.description,
+         timestamp = EXCLUDED.timestamp
+       RETURNING id, username, date, status, description, timestamp`,
+      [username, date, status, description || null, timestamp || new Date().toISOString()]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Tarea registrada exitosamente",
+      report: result.rows[0],
+    });
+
+  } catch (error) {
+    console.error("Error registrando tarea:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor al registrar tarea",
+      error: error.message,
+    });
+  }
+});
+
+// Endpoint para obtener el historial de tareas de un usuario
+app.get("/historial/:username", async (req, res) => {
+  const { username } = req.params;
+  const { limit = 10, offset = 0 } = req.query;
+
+  try {
+    // Verificar que el usuario existe
+    const userCheck = await pool.query(
+      "SELECT username FROM users_login WHERE username = $1 AND is_active = true",
+      [username]
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Usuario no encontrado o desactivado",
+      });
+    }
+
+    // Obtener el historial ordenado por fecha descendente
+    const result = await pool.query(
+      `SELECT id, username, date, status, description, timestamp 
+       FROM daily_reports 
+       WHERE username = $1 
+       ORDER BY date DESC 
+       LIMIT $2 OFFSET $3`,
+      [username, parseInt(limit), parseInt(offset)]
+    );
+
+    // Obtener el total de registros para paginación
+    const countResult = await pool.query(
+      "SELECT COUNT(*) FROM daily_reports WHERE username = $1",
+      [username]
+    );
+
+    res.json({
+      success: true,
+      total: parseInt(countResult.rows[0].count),
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      reports: result.rows,
+    });
+
+  } catch (error) {
+    console.error("Error obteniendo historial:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor al obtener historial",
+      error: error.message,
+    });
+  }
+});
+
+// Endpoint para obtener el reporte de un día específico
+app.get("/tarea/:username/:date", async (req, res) => {
+  const { username, date } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT id, username, date, status, description, timestamp 
+       FROM daily_reports 
+       WHERE username = $1 AND date = $2`,
+      [username, date]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No se encontró reporte para esta fecha",
+      });
+    }
+
+    res.json({
+      success: true,
+      report: result.rows[0],
+    });
+
+  } catch (error) {
+    console.error("Error obteniendo tarea del día:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+      error: error.message,
+    });
+  }
+});
+
+// Endpoint para obtener estadísticas del usuario
+app.get("/estadisticas/:username", async (req, res) => {
+  const { username } = req.params;
+
+  try {
+    // Verificar que el usuario existe
+    const userCheck = await pool.query(
+      "SELECT username FROM users_login WHERE username = $1 AND is_active = true",
+      [username]
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Usuario no encontrado o desactivado",
+      });
+    }
+
+    // Obtener estadísticas
+    const stats = await pool.query(
+      `SELECT 
+        COUNT(*) as total_reportes,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completados,
+        COUNT(CASE WHEN status = 'failed' THEN 1 END) as fallidos,
+        ROUND(
+          (COUNT(CASE WHEN status = 'completed' THEN 1 END)::numeric / 
+          NULLIF(COUNT(*)::numeric, 0) * 100), 2
+        ) as porcentaje_cumplimiento
+       FROM daily_reports 
+       WHERE username = $1`,
+      [username]
+    );
+
+    res.json({
+      success: true,
+      statistics: stats.rows[0],
+    });
+
+  } catch (error) {
+    console.error("Error obteniendo estadísticas:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+      error: error.message,
+    });
+  }
+});
+
+
+
+
 // Manejo de errores global
 app.use((error, req, res, next) => {
   console.error("Error no manejado:", error);
